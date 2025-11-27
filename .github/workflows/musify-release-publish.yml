@@ -1,0 +1,104 @@
+name: Musify Release APK (signed + publish)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'     # runs when you push a tag like v9.6.15, v1.0.0 etc.
+
+permissions:
+  contents: write
+
+env:
+  PROPERTIES_PATH: './android/key.properties'
+
+jobs:
+  build:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17.x'
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # Detect Flutter version from pubspec.yaml (same trick as original)
+      - name: Detect Flutter version
+        run: |
+          pip install -U yq
+          echo "FLUTTER_VERSION=$(yq -r .environment.flutter pubspec.yaml | sed 's/\^//g')" >> $GITHUB_ENV
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: "${{ env.FLUTTER_VERSION }}"
+          cache: true
+
+      # Generate keystore and key.properties ON THE RUNNER (no secrets)
+      - name: Generate release keystore
+        run: |
+          mkdir -p android/app
+          keytool -genkeypair \
+            -alias musifyKey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass password \
+            -keypass password \
+            -dname "CN=Musify,O=Self,C=US" \
+            -keystore android/app/key.jks
+
+          cat > ${{ env.PROPERTIES_PATH }} <<EOF
+storePassword=password
+keyPassword=password
+keyAlias=musifyKey
+storeFile=key.jks
+EOF
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart code
+        run: flutter analyze .
+
+      # Build arm64 APK (github flavor)
+      - name: Build arm64 APK
+        run: flutter build apk --release --split-per-abi --target-platform=android-arm64 --flavor github
+
+      # Build universal APK (github flavor)
+      - name: Build universal APK
+        run: flutter build apk --release --flavor github
+
+      - name: Upload signed release APKs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: musify-signed-release-apks
+          path: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-github-release.apk
+            build/app/outputs/flutter-apk/app-github-release.apk
+
+      - name: Publish GitHub Release with APKs
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/app/outputs/flutter-apk/app-arm64-v8a-github-release.apk
+            build/app/outputs/flutter-apk/app-github-release.apk
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

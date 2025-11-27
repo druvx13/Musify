@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'     # runs when you push a tag like v9.6.15, v1.0.0 etc.
+      - "v*"
 
 permissions:
   contents: write
 
 env:
-  PROPERTIES_PATH: './android/key.properties'
+  PROPERTIES_PATH: ./android/key.properties
 
 jobs:
   build:
@@ -24,8 +24,8 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17.x'
+          distribution: zulu
+          java-version: "17"
 
       - name: Cache Gradle dependencies
         uses: actions/cache@v4
@@ -37,7 +37,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # Detect Flutter version from pubspec.yaml (same trick as original)
       - name: Detect Flutter version
         run: |
           pip install -U yq
@@ -46,11 +45,10 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
-          flutter-version: "${{ env.FLUTTER_VERSION }}"
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
-      # Generate keystore and key.properties ON THE RUNNER (no secrets)
       - name: Generate release keystore
         run: |
           mkdir -p android/app
@@ -64,7 +62,7 @@ jobs:
             -dname "CN=Musify,O=Self,C=US" \
             -keystore android/app/key.jks
 
-          cat > ${{ env.PROPERTIES_PATH }} <<EOF
+          cat > "$PROPERTIES_PATH" <<EOF
 storePassword=password
 keyPassword=password
 keyAlias=musifyKey
@@ -77,11 +75,9 @@ EOF
       - name: Analyze Dart code
         run: flutter analyze .
 
-      # Build arm64 APK (github flavor)
       - name: Build arm64 APK
         run: flutter build apk --release --split-per-abi --target-platform=android-arm64 --flavor github
 
-      # Build universal APK (github flavor)
       - name: Build universal APK
         run: flutter build apk --release --flavor github
 
@@ -99,6 +95,5 @@ EOF
           files: |
             build/app/outputs/flutter-apk/app-arm64-v8a-github-release.apk
             build/app/outputs/flutter-apk/app-github-release.apk
-          tag_name: ${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
